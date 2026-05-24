@@ -1,8 +1,8 @@
 // News aggregator. Runs in GitHub Actions every 15 minutes.
 //
-// For each row in public.news_sources (where enabled = true), fetch
-// the rss_url, parse with fast-xml-parser, normalize fields, then
-// upsert into public.news_items on (source_id, external_id). The
+// For each row in news.sources (where enabled = true), fetch the
+// rss_url, parse with fast-xml-parser, normalize fields, then
+// upsert into news.items on (source_id, external_id). The
 // dedup conflict-target is unique-indexed, so re-fetching the same
 // items is a no-op — only genuinely new items appear in the mobile
 // feed.
@@ -159,18 +159,25 @@ async function main() {
     auth: { persistSession: false },
   });
 
-  const { data: sources, error: srcErr } = await supabase
-    .from('news_sources')
+  // News data moved out of public into its own schema in migration
+  // 0069 of the main repo. Table names dropped the redundant `news_`
+  // prefix (news_sources → news.sources, news_items → news.items).
+  // Route every read/write through .schema('news') with the short
+  // names.
+  const news = supabase.schema('news');
+
+  const { data: sources, error: srcErr } = await news
+    .from('sources')
     .select('id, name_ar, rss_url')
     .eq('enabled', true)
     .order('sort_order');
 
   if (srcErr) {
-    console.error('Failed to load news_sources:', srcErr.message);
+    console.error('Failed to load news.sources:', srcErr.message);
     process.exit(1);
   }
   if (!sources || sources.length === 0) {
-    console.log('No enabled news_sources — exiting cleanly.');
+    console.log('No enabled news.sources — exiting cleanly.');
     return;
   }
 
@@ -196,8 +203,8 @@ async function main() {
       continue;
     }
 
-    const { error: upsertErr, count } = await supabase
-      .from('news_items')
+    const { error: upsertErr, count } = await news
+      .from('items')
       .upsert(result.items, {
         onConflict: 'source_id,external_id',
         ignoreDuplicates: false, // we want updates if title/image changes

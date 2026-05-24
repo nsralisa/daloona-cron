@@ -22,11 +22,19 @@ Nothing sensitive is in this repo:
 
 | Workflow | Schedule | Script | What it does |
 |---|---|---|---|
-| `fx-update.yml` | every 30 min | `scripts/fx-fetch.ts` | Scrape sp-today + cb.gov.sy → upsert exchange-rate rows + gold karats into `fx_rates` / `fx_gold` |
-| `news-update.yml` | every 15 min | `scripts/news-fetch.ts` | Fetch RSS from curated Syrian news outlets → upsert headlines into `news_items` (dedup on `source_id, external_id`) |
+| `fx-update.yml` | every 30 min | `scripts/fx-fetch.ts` | Scrape sp-today + cb.gov.sy → upsert exchange-rate rows + gold karats into `fx.rates` / `fx.gold` |
+| `news-update.yml` | every 15 min | `scripts/news-fetch.ts` | Fetch RSS from curated Syrian news outlets → upsert headlines into `news.items` (dedup on `source_id, external_id`) |
 
 Both write to the same Supabase project the main Bawaba app reads
 from, via the service-role key.
+
+> **Schema note.** The main repo's migrations 0068 + 0069 moved the
+> FX + news tables out of `public` and into their own schemas (`fx`,
+> `news`). These scripts route every read/write through
+> `supabase.schema('fx' | 'news')`. If you point this at a Supabase
+> project that hasn't applied 0065–0069 yet, the writes will 404 —
+> apply the schema migrations first, then add `fx, news` to the
+> project's Settings → API → "Exposed schemas".
 
 ## Local test
 

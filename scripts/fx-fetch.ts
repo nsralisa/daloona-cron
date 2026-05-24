@@ -1,8 +1,8 @@
 // FX rate fetcher. Runs in GitHub Actions every 30 minutes.
 //
 // Two sources, written to two tables:
-//   sp-today  → fx_rates (currencies) + fx_gold (gold) — parallel market
-//   cbs       → fx_rates (currencies)                  — official rate
+//   sp-today  → fx.rates (currencies) + fx.gold (gold) — parallel market
+//   cbs       → fx.rates (currencies)                  — official rate
 //
 // sp-today: GET https://sse.sp-today.com/snapshot returns a single JSON
 // payload with all currencies (30+) and all gold karats (5) for every
@@ -445,8 +445,14 @@ async function main() {
 
   const fetchedAt = new Date().toISOString();
 
-  const { error: fxError } = await supabase
-    .from('fx_rates')
+  // FX data moved out of public into its own schema in migration 0068
+  // of the main repo. Table names dropped the redundant `fx_` prefix
+  // along the way (fx_rates → fx.rates, etc). Route every write
+  // through .schema('fx') and use the short names.
+  const fx = supabase.schema('fx');
+
+  const { error: fxError } = await fx
+    .from('rates')
     .insert(currencyRows.map((r) => ({ ...r, fetched_at: fetchedAt })));
   if (fxError) throw fxError;
   console.log(`✓ wrote ${currencyRows.length} currency rows at ${fetchedAt}`);
@@ -455,27 +461,27 @@ async function main() {
   // failure on one shouldn't sink the whole run — currencies are already
   // written and the others can recover on the next cron tick.
   await Promise.allSettled([
-    bestEffortInsert(supabase, 'fx_gold', goldRows, fetchedAt),
-    bestEffortInsert(supabase, 'fx_silver', silverRows, fetchedAt),
-    bestEffortInsert(supabase, 'fx_fuel', fuelRows, fetchedAt),
-    bestEffortInsert(supabase, 'fx_electricity', elecRows, fetchedAt),
+    bestEffortInsert(fx, 'gold', goldRows, fetchedAt),
+    bestEffortInsert(fx, 'silver', silverRows, fetchedAt),
+    bestEffortInsert(fx, 'fuel', fuelRows, fetchedAt),
+    bestEffortInsert(fx, 'electricity', elecRows, fetchedAt),
   ]);
 }
 
 async function bestEffortInsert<T extends object>(
-  supabase: ReturnType<typeof createClient>,
+  fx: ReturnType<ReturnType<typeof createClient>['schema']>,
   table: string,
   rows: T[],
   fetchedAt: string,
 ): Promise<void> {
   if (rows.length === 0) return;
-  const { error } = await supabase
+  const { error } = await fx
     .from(table)
     .insert(rows.map((r) => ({ ...r, fetched_at: fetchedAt })));
   if (error) {
-    console.error(`✖ ${table} insert failed (continuing):`, error.message);
+    console.error(`✖ fx.${table} insert failed (continuing):`, error.message);
   } else {
-    console.log(`✓ wrote ${rows.length} ${table} rows`);
+    console.log(`✓ wrote ${rows.length} fx.${table} rows`);
   }
 }
 
