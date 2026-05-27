@@ -23,18 +23,37 @@ Nothing sensitive is in this repo:
 | Workflow | Schedule | Script | What it does |
 |---|---|---|---|
 | `fx-update.yml` | every 30 min | `scripts/fx-fetch.ts` | Scrape sp-today + cb.gov.sy → upsert exchange-rate rows + gold karats into `fx.rates` / `fx.gold` |
-| `news-update.yml` | every 15 min | `scripts/news-fetch.ts` | Fetch RSS from curated Syrian news outlets → upsert headlines into `news.items` (dedup on `source_id, external_id`) |
+| `news-update.yml` | every 5–15 min | `scripts/news-fetch.ts` | Fetch RSS from curated Syrian news outlets → upsert headlines into `news.items` (dedup on `source_id, external_id`), compute a BlurHash placeholder per item's hero image |
 
 Both write to the same Supabase project the main Bawaba app reads
 from, via the service-role key.
+
+### News BlurHash pipeline
+
+After image_url resolution (RSS extraction + og:image fallback), the
+news script fetches each item's source image and computes a **BlurHash**
+— a ~28-byte string that the mobile + web clients decode into a
+blurred preview that renders instantly before the real image bytes
+arrive. Critical UX on weak Syrian mobile connections.
+
+Pipeline per item:
+
+1. Fetch source image with a 2.5 MB cap + 8s timeout (`User-Agent: BawabaNewsFetcher`)
+2. `sharp` resizes to 32×32 RGBA
+3. `blurhash` encodes with 4×3 components → 28-char string
+4. Stored in `news.items.image_blurhash` via the existing upsert (column added in main repo migration `0080_news_blurhash.sql`)
+
+Failures (network, decode, oversized image) silently store `null`;
+the mobile card falls back to its surface-elevated rectangle. Encode
+itself is ~10 ms per image; the bottleneck is the source fetch.
 
 > **Schema note.** The main repo's migrations 0068 + 0069 moved the
 > FX + news tables out of `public` and into their own schemas (`fx`,
 > `news`). These scripts route every read/write through
 > `supabase.schema('fx' | 'news')`. If you point this at a Supabase
-> project that hasn't applied 0065–0069 yet, the writes will 404 —
-> apply the schema migrations first, then add `fx, news` to the
-> project's Settings → API → "Exposed schemas".
+> project that hasn't applied 0065–0069 + 0080 yet, the writes will
+> 404 — apply the schema migrations first, then add `fx, news` to
+> the project's Settings → API → "Exposed schemas".
 
 ## Local test
 
