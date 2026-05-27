@@ -28,6 +28,9 @@
 // Local test:
 //   SUPABASE_SERVICE_ROLE_KEY=eyJ... bun run scripts/news-fetch.ts
 
+import { encode as encodeBlurhash } from 'blurhash';
+import sharp from 'sharp';
+
 import { createClient } from '@supabase/supabase-js';
 import { XMLParser } from 'fast-xml-parser';
 
@@ -97,6 +100,12 @@ type NewsItemRow = {
   summary: string | null;
   url: string;
   image_url: string | null;
+  // BlurHash string (~28 bytes) decoded client-side into a blurred
+  // placeholder while the real image_url loads. Computed at ingest
+  // from a 32px-wide downscale of the source image. Null when the
+  // item has no image_url or when the fetch/decode failed.
+  // Column added in main repo migration 0080.
+  image_blurhash: string | null;
   published_at: string; // ISO
 };
 
@@ -108,6 +117,21 @@ const MAX_AGE_DAYS = 30;
 const SUMMARY_MAX_LEN = 400;
 const REQUEST_TIMEOUT_MS = 15_000;
 const OG_FETCH_TIMEOUT_MS = 8_000;
+const BLURHASH_FETCH_TIMEOUT_MS = 8_000;
+// Max raster bytes we'll pull into memory for BlurHash compute. Most
+// news heroes are <1 MB but some sources serve 5+ MB originals. Cap
+// guards GitHub Actions memory + run time without changing card UX
+// (we only need the rough color blob, full pixels are overkill).
+const BLURHASH_MAX_FETCH_BYTES = 2_500_000;
+// Downscale size before encoding. BlurHash perceptual quality plateaus
+// past ~32px wide — going bigger just costs decode time on mobile.
+const BLURHASH_SAMPLE_WIDTH = 32;
+const BLURHASH_SAMPLE_HEIGHT = 32;
+// 4x3 components is the standard for landscape thumbnails (1024 entries
+// in the colorspace, ≈28 chars). Bumping above ~5x4 wastes payload
+// bytes without visible quality gain at card sizes.
+const BLURHASH_COMPONENTS_X = 4;
+const BLURHASH_COMPONENTS_Y = 3;
 
 // Substrings that, when found in a URL pulled from the RSS feed,
 // indicate the source served us an advertising/placeholder image
@@ -319,6 +343,9 @@ async function fetchSource(source: NewsSource): Promise<{
       summary: summary ? decodeEntities(summary) : null,
       url,
       image_url: sanitizeImageUrl(imageUrl) || null,
+      // Computed in a separate pass below — after image_url has been
+      // resolved (which itself may run the og:image fallback first).
+      image_blurhash: null,
       published_at: new Date(publishedAtMs).toISOString(),
     });
   }
@@ -358,7 +385,86 @@ async function fetchSource(source: NewsSource): Promise<{
     }),
   );
 
+  // Compute BlurHash placeholders for every item with a resolved
+  // image_url. Runs in parallel across the source's items; each
+  // compute has its own 8s timeout so a slow source can't sink the
+  // whole batch. Items with no image_url leave image_blurhash null
+  // and the mobile card falls back to its surface-elevated rectangle.
+  await Promise.all(
+    finalItems.map(async (it) => {
+      if (!it.image_url) return;
+      const hash = await computeBlurhash(it.image_url);
+      it.image_blurhash = hash;
+    }),
+  );
+
   return { source, items: finalItems };
+}
+
+// Compute a BlurHash from an image URL. Used so mobile cards can
+// render a blurred placeholder INSTANTLY (decoded client-side via
+// expo-image) before the real image_url lands over the network —
+// critical UX on the weak Syrian connections most of our users hit
+// the app on.
+//
+// Pipeline: fetch source bytes (cap at BLURHASH_MAX_FETCH_BYTES) →
+// sharp resizes to 32×32 RGBA → blurhash.encode → 4x3-component
+// string. Returns null on any failure (network, decode, image too
+// weird for sharp) — caller stores null and the mobile card falls
+// back to its surface-elevated placeholder.
+//
+// We fetch the ORIGINAL source URL (not via our cdn.bawaba.dev
+// transform). Two reasons: 1) GitHub Actions has fast US/EU
+// connectivity so source latency isn't the bottleneck for the cron
+// (vs the Syrian mobile case); 2) hitting our own transform from
+// the cron would burn through CF Image Transformations quota on
+// requests no real user will ever look at.
+async function computeBlurhash(imageUrl: string): Promise<string | null> {
+  const controller = new AbortController();
+  const timeout = setTimeout(
+    () => controller.abort(),
+    BLURHASH_FETCH_TIMEOUT_MS,
+  );
+  try {
+    const res = await fetch(imageUrl, {
+      headers: { 'User-Agent': UA, Accept: 'image/*' },
+      signal: controller.signal,
+      redirect: 'follow',
+    });
+    if (!res.ok) return null;
+    // Optional content-length pre-check so we don't even start
+    // streaming a 50 MB original.
+    const cl = res.headers.get('content-length');
+    if (cl && Number(cl) > BLURHASH_MAX_FETCH_BYTES) return null;
+
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.byteLength === 0 || buf.byteLength > BLURHASH_MAX_FETCH_BYTES) {
+      return null;
+    }
+
+    // sharp handles JPEG/PNG/WebP/AVIF/GIF (first frame). resize +
+    // ensureAlpha + raw() gives us a plain RGBA pixel buffer of the
+    // requested size — exactly what blurhash.encode wants.
+    const { data } = await sharp(buf)
+      .resize(BLURHASH_SAMPLE_WIDTH, BLURHASH_SAMPLE_HEIGHT, {
+        fit: 'cover',
+      })
+      .ensureAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+
+    return encodeBlurhash(
+      new Uint8ClampedArray(data),
+      BLURHASH_SAMPLE_WIDTH,
+      BLURHASH_SAMPLE_HEIGHT,
+      BLURHASH_COMPONENTS_X,
+      BLURHASH_COMPONENTS_Y,
+    );
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 // Fetch the article HTML and pull out <meta property="og:image" content="…">
