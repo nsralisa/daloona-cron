@@ -11,6 +11,14 @@ on:
   # If cron-job.org goes down: trigger manually here, or restore
   # `schedule: - cron: '*/5 * * * *'` as a fallback.
   workflow_dispatch: {}
+  # FALLBACK (2026-08-14). cron-job.org POSTs to this workflow's
+  # /dispatches endpoint and addresses the repo BY NAME. When the repo
+  # was renamed bawaba-cron -> daloona-cron those POSTs began hitting a
+  # 301 that a simple client will not follow on POST; the feed went 27
+  # hours stale while every run in the list still showed green.
+  # A native schedule cannot be broken by someone else's stale URL.
+  schedule:
+    - cron: '*/10 * * * *'
 
 jobs:
   update:

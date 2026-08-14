@@ -5,6 +5,14 @@ on:
   # `schedule:` event. Same setup: cron-job.org triggers every 5 min
   # via /dispatches.
   workflow_dispatch: {}
+  # FALLBACK (2026-08-14). cron-job.org POSTs to this workflow's
+  # /dispatches endpoint and addresses the repo BY NAME. When the repo
+  # was renamed bawaba-cron -> daloona-cron those POSTs began hitting a
+  # 301 that a simple client will not follow on POST; the feed went 27
+  # hours stale while every run in the list still showed green.
+  # A native schedule cannot be broken by someone else's stale URL.
+  schedule:
+    - cron: '*/30 * * * *'
 
 jobs:
   update:
