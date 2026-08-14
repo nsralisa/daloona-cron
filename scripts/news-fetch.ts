@@ -110,7 +110,7 @@ type NewsItemRow = {
 };
 
 const UA =
-  'Mozilla/5.0 (compatible; BawabaNewsFetcher/1.0; +https://bawaba.syrially.com)';
+  'Mozilla/5.0 (compatible; DaloonaNewsFetcher/1.0; +https://daloona.app)';
 
 const MAX_ITEMS_PER_SOURCE = 30;
 const MAX_AGE_DAYS = 30;
@@ -413,7 +413,7 @@ async function fetchSource(source: NewsSource): Promise<{
 // weird for sharp) — caller stores null and the mobile card falls
 // back to its surface-elevated placeholder.
 //
-// We fetch the ORIGINAL source URL (not via our cdn.bawaba.dev
+// We fetch the ORIGINAL source URL (not via our cdn.daloona.dev
 // transform). Two reasons: 1) GitHub Actions has fast US/EU
 // connectivity so source latency isn't the bottleneck for the cron
 // (vs the Syrian mobile case); 2) hitting our own transform from

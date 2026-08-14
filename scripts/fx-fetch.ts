@@ -41,7 +41,7 @@ type GoldRow = {
 };
 
 const UA =
-  'Mozilla/5.0 (compatible; BawabaFxFetcher/1.0; +https://bawaba.vercel.app)';
+  'Mozilla/5.0 (compatible; DaloonaFxFetcher/1.0; +https://daloona.app)';
 
 // ─── sp-today ───────────────────────────────────────────────────────────────
 //

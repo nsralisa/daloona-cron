@@ -1,10 +1,10 @@
-# bawaba-cron
+# daloona-cron
 
-Scheduled background jobs for [Bawaba](https://bawaba.syrially.com) — an
+Scheduled background jobs for [Daloona](https://daloona.app) — an
 independent directory of Syrian websites and digital services.
 
 This repo exists for one reason: **GitHub Actions on private repos is
-metered (2,000 min/month free), public repos are unlimited.** Bawaba's
+metered (2,000 min/month free), public repos are unlimited.** Daloona's
 crons add up to ~4,000 min/month, so the cron infrastructure lives here
 in public while the app code stays in a separate private repo.
 
@@ -14,7 +14,7 @@ Nothing sensitive is in this repo:
 - Credentials live in encrypted GitHub Secrets (`SUPABASE_URL`,
   `SUPABASE_SERVICE_ROLE_KEY`) — never in code, never in env files
 - The Syrian RSS feeds we poll are public (the same feeds we list at
-  https://bawaba.syrially.com/sources)
+  https://daloona.app/sources)
 - The Supabase project URL is public by design (it's in the mobile
   bundle and on the marketing site)
 
@@ -25,7 +25,7 @@ Nothing sensitive is in this repo:
 | `fx-update.yml` | every 30 min | `scripts/fx-fetch.ts` | Scrape sp-today + cb.gov.sy → upsert exchange-rate rows + gold karats into `fx.rates` / `fx.gold` |
 | `news-update.yml` | every 5–15 min | `scripts/news-fetch.ts` | Fetch RSS from curated Syrian news outlets → upsert headlines into `news.items` (dedup on `source_id, external_id`), compute a BlurHash placeholder per item's hero image |
 
-Both write to the same Supabase project the main Bawaba app reads
+Both write to the same Supabase project the main Daloona app reads
 from, via the service-role key.
 
 ### News BlurHash pipeline
@@ -38,7 +38,7 @@ arrive. Critical UX on weak Syrian mobile connections.
 
 Pipeline per item:
 
-1. Fetch source image with a 2.5 MB cap + 8s timeout (`User-Agent: BawabaNewsFetcher`)
+1. Fetch source image with a 2.5 MB cap + 8s timeout (`User-Agent: DaloonaNewsFetcher`)
 2. `sharp` resizes to 32×32 RGBA
 3. `blurhash` encodes with 4×3 components → 28-char string
 4. Stored in `news.items.image_blurhash` via the existing upsert (column added in main repo migration `0080_news_blurhash.sql`)
